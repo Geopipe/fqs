@@ -53,7 +53,7 @@ def quadratic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor) -> Tuple[tf.Tensor
 
     return r1, r2
 
-def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, unique_real_root : bool = False) -> Union[Tuple[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor]]:
+def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, first_root_only : bool = False) -> Union[Tuple[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor]]:
     ''' Analytical closed-form solver for a single cubic equation
     (3rd order polynomial), gives all three roots.
 
@@ -72,8 +72,8 @@ def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, unique
         Output data is a tuple of three roots of a given polynomial.
     '''
 
-    if unique_real_root and (a0.dtype.is_complex or b0.dtype.is_complex or c0.dtype.is_complex or d0.dtype.is_complex):
-        raise TypeError("There may be no real root if the coefficients are complex")
+    #if unique_real_root and (a0.dtype.is_complex or b0.dtype.is_complex or c0.dtype.is_complex or d0.dtype.is_complex):
+    #    raise TypeError("There may be no real root if the coefficients are complex")
 
     # Reduce the cubic equation to the form:
     #    x^3 + b*x^2 + c*x + d = 0
@@ -98,24 +98,26 @@ def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, unique
         return tf.where(x_real_nonneg, x**third, -(-x)**third)
             
     def single_repeated_root():
-        r1 = neg_third_b 
-        if unique_real_root:
+        r1 = neg_third_b
+        r1 = _ensure_complex(r1)
+        if first_root_only:
             return r1,
         else:
-            r1 = _ensure_complex(r1)
             return r1, r1, r1
     
     # general_case
     def multiple_roots():
-        sqr_branches = _ensure_complex(tf.where(null_delta0, tf.constant(1., dtype=delta0.dtype), tf.constant(-1., dtype=delta0.dtype)))
-        C1 = cubic_root((_ensure_complex(delta1) + sqr_branches * tf.sqrt(_ensure_complex(delta1 * delta1 - 4. * delta0 * delta0 * delta0))) / 2.)
+        C1 = cubic_root((_ensure_complex(delta1) + tf.sqrt(_ensure_complex(delta1 * delta1 - 4. * delta0 * delta0 * delta0))) / 2.)
         C_branches = (C1, (-1. + sqr3 * 1j) * C1 / 2, (-1. - sqr3 * 1j) * C1 / 2)
-        rs = tuple(_ensure_complex(neg_third_b) - third * (C + _ensure_complex(delta0) / C) for C in C_branches)
-        if unique_real_root:
+        r_branch = lambda i: _ensure_complex(neg_third_b) - third * (C_branches[i] + _ensure_complex(delta0) / C_branches[i])
+        r1 = r_branch(0)
+        if first_root_only:
             # this is only valid if the tests for complex coefficients has run above.
-            return tf.math.real(rs[0]),
+            return r1,
         else:
-            return rs
+            r2 = r_branch(1)
+            r3 = r_branch(2)
+            return r1, r2, r3
     
     # Masks for different combinations of roots
     triple_root_mask = null_delta0 & null_delta1
@@ -157,14 +159,11 @@ def quartic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, e0 :
     r = 3*a02*a02 - b*a02 + c*a0 - d
 
     # One root of the cubic equation
-    z0 = cubic(1, p, r, p*r - 0.5*q*q, unique_real_root = True)
+    z0, = cubic(1, p, r, p*r - 0.5*q*q, first_root_only = True)
 
     # Additional variables
-    s = tf.sqrt(_ensure_complex(2*p + 2*z0))
-    if s == 0:
-        t = _ensure_complex(z0*z0 + r)
-    else:
-        t = _ensure_complex(-q) / s
+    s = tf.sqrt(_ensure_complex(2*p) + 2*z0)
+    t = tf.where(s == 0, z0*z0 + _ensure_complex(r), _ensure_complex(-q) / s)
 
     # Compute roots by quadratic equations
     one_complex = tf.constant(1, dtype=s.dtype)
