@@ -19,7 +19,27 @@ def _ensure_complex(z : tf.Tensor) -> tf.Tensor:
     else:
         raise TypeError("z must be already complex, float32, or float64")
 
-def quadratic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+def linear(a0 : tf.Tensor, b0 : tf.Tensor) -> tf.Tensor:
+        ''' Analytical solver for a single linear equation
+    (1st order polynomial).
+
+    Parameters
+    ----------
+    a0, b0: array_like
+        Input data are coefficients of the Linear polynomial::
+
+            a0*x + b0 = 0
+
+    the `a0` elements must all be non-zero
+
+    Returns
+    -------
+    r1, r2: tuple
+        Output data is a tuple of two roots of a given polynomial.
+    '''
+        return -b0 / a0
+
+def quadratic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, assume_quadratic = True) -> Tuple[tf.Tensor, tf.Tensor]:
     ''' Analytical solver for a single quadratic equation
     (2nd order polynomial).
 
@@ -38,22 +58,28 @@ def quadratic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor) -> Tuple[tf.Tensor
         Output data is a tuple of two roots of a given polynomial.
     '''
     # Reduce the quadratic equation to the form:
-    #    x^2 + ax + b = 0
-    a, b = b0 / a0, c0 / a0
+    #    x^2 + bx + c = 0
+    b, c = b0 / a0, c0 / a0
 
-    # Some repating variables
-    a0 = -0.5*a
-    delta = a0*a0 - b
+    # Some repeating variables
+    n_half_b = -0.5*b
+    delta = n_half_b*n_half_b - c
     sqrt_delta = tf.sqrt(_ensure_complex(delta))
-    a0 = _ensure_complex(a0)
+    n_half_b = _ensure_complex(n_half_b)
 
     # Roots
-    r1 = a0 - sqrt_delta
-    r2 = a0 + sqrt_delta
+    r1 = n_half_b - sqrt_delta
+    r2 = n_half_b + sqrt_delta
 
-    return r1, r2
+    if assume_quadratic:
+        return r1, r2
+    else:
+        # linear fall-back
+        flag_degenerate = (a0 == 0)
+        r0 = _ensure_complex(linear(b0, c0))
+        return tf.where(flag_degenerate, r0, r1), tf.where(flag_degenerate, r0, r2)
 
-def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, first_root_only : bool = False) -> Union[Tuple[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor]]:
+def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, first_root_only : bool = False, assume_cubic : bool = True) -> Union[Tuple[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor]]:
     ''' Analytical closed-form solver for a single cubic equation
     (3rd order polynomial), gives all three roots.
 
@@ -118,14 +144,28 @@ def cubic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, first_
             r2 = r_branch(1)
             r3 = r_branch(2)
             return r1, r2, r3
+        
     
     # Masks for different combinations of roots
     triple_root_mask = null_delta0 & null_delta1
     root_branches = zip(single_repeated_root(), multiple_roots())
-    return tuple(tf.where(triple_root_mask, single_branch, multiple_branch) for single_branch, multiple_branch in root_branches)
+    cubic_roots = tuple(tf.where(triple_root_mask, single_branch, multiple_branch) for single_branch, multiple_branch in root_branches)
+    if assume_cubic:
+        return cubic_roots
+    else:
+        def quadratic_roots():
+            r1, r2 = quadratic(b0, c0, d0, assume_quadratic=False)
+            if first_root_only:
+                return r1
+            else:
+                return r1, r1, r2
+        quadratic_mask = (a0 == 0)
+        root_branches = zip(quadratic_roots(), cubic_roots)
+        return tuple(tf.where(quadratic_mask, quadratic_branch, cubic_branch) for quadratic_branch, cubic_branch in root_branches)
+
     
 
-def quartic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, e0 : tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+def quartic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, e0 : tf.Tensor, assume_quartic : bool = True) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
     ''' Analytical closed-form solver for a single quartic equation
     (4th order polynomial). Calls `cubic` and
     `quadratic`.
@@ -146,17 +186,17 @@ def quartic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, e0 :
     '''
 
     # Reduce the quartic equation to the form:
-    #    x^4 + a*x^3 + b*x^2 + c*x + d = 0
-    a, b, c, d = b0/a0, c0/a0, d0/a0, e0/a0
+    #    x^4 + b*x^3 + c*x^2 + d*x + e = 0
+    b, c, d, e = b0/a0, c0/a0, d0/a0, e0/a0
 
     # Some repeating variables
-    a0 = 0.25*a
-    a02 = a0*a0
+    quarter_b = 0.25*b
+    sixteenth_b2 = quarter_b*quarter_b
 
     # Coefficients of subsidiary cubic euqtion
-    p = 3*a02 - 0.5*b
-    q = a*a02 - b*a0 + 0.5*c
-    r = 3*a02*a02 - b*a02 + c*a0 - d
+    p = 3*sixteenth_b2 - 0.5*c
+    q = b*sixteenth_b2 - c*quarter_b + 0.5*d
+    r = 3*sixteenth_b2*sixteenth_b2 - c*sixteenth_b2 + d*quarter_b - e
 
     # One root of the cubic equation
     z0, = cubic(1, p, r, p*r - 0.5*q*q, first_root_only = True)
@@ -170,6 +210,15 @@ def quartic(a0 : tf.Tensor, b0 : tf.Tensor, c0 : tf.Tensor, d0 : tf.Tensor, e0 :
     r0, r1 = quadratic(one_complex, s, _ensure_complex(z0 + t))
     r2, r3 = quadratic(one_complex, -s, _ensure_complex(z0 - t))
 
-    a0 = _ensure_complex(a0)
+    quarter_b = _ensure_complex(quarter_b)
 
-    return r0 - a0, r1 - a0, r2 - a0, r3 - a0
+    quartic_roots = (r0 - quarter_b, r1 - quarter_b, r2 - quarter_b, r3 - quarter_b)
+    if assume_quartic:
+        return quartic_roots
+    else:
+        def cubic_roots():
+            r1, r2, r3 = cubic(b0, c0, d0, e0, assume_cubic=False)
+            return (r1, r1, r2, r3)
+        cubic_mask = (a0 == 0)
+        root_branches = zip(cubic_roots(), quartic_roots)
+        return tuple(tf.where(cubic_mask, cubic_branch, quartic_branch) for cubic_branch, quartic_branch in root_branches)
