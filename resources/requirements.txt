@@ -1,0 +1,8 @@
+tensorflow==2.11.0
+numpy==1.20.3
+yapf==0.32.0
+isort==5.10.1
+pytest==7.2.1
+pytest-xdist==3.2.0
+pre-commit==2.20.0
+mypy==1.2.0
