@@ -1,7 +1,5 @@
 from typing import Any, Callable, FrozenSet, Set
 
-import numpy as np
-from numpy.polynomial.polynomial import Polynomial as Poly
 from .fqs import cubic
 from .fqs import cubic_root
 from .fqs import ensure_complex
@@ -19,19 +17,57 @@ def random_roots(solver: Callable,
                  samples: int = 3,
                  lb: float = -3,
                  ub: float = 3,
-                 complex: bool = False) -> np.ndarray:
-    sampler = lambda: np.random.uniform(lb, ub, (samples, degrees[solver]))
+                 complex: bool = False) -> tf.Tensor:
+    sampler = lambda: tf.random.uniform((samples, degrees[solver]), lb, ub, dtype=tf.float64)
     real = sampler()
     if complex:
-        return real + sampler() * 1j
+        return tf.dtypes.complex(real, sampler())
     else:
         return real
 
+def coefs_from_roots(roots : tf.Tensor) -> tf.Tensor:
+    # returns polynomial coefficients in decreasing order (as typically read left->right)
+    # note this is the opposite convention used by np.polynomial, which takes coefs in increasing order
+    # ALWAYS RETURN DOUBLE PRECISION FOR LESS VERBOSE TEST CONSTRUCTION DOWNSTREAM
+    linears = tf.stack([-roots, tf.ones_like(roots)], axis=-1)
+    coefs = linears[0:1, ::-1]
+    if roots.dtype.is_complex:
+        coefs = tf.bitcast(coefs, roots.dtype.real_dtype)
+    else:
+        coefs = tf.expand_dims(coefs, -1)
+    tail = linears[1:,  :]
+    for i in range(tail.shape[0]):
+        coefs = tf.pad(coefs, tf.constant([[0, 0], [1, 1], [0, 0]]))
+        filters = tf.expand_dims(tail[i,:], -1)
+        if filters.dtype.is_complex:
+            # signature for filter multiplication in conv1d is
+            # specified as r * A where r is a row vector.
+            # and complex multiplication of (x + iy) * (w + iz)
+            # is equivalent to
+            # [w, z] * [[x, y], [-y, x]]
+            filters = tf.bitcast(filters, filters.dtype.real_dtype)
+            filters = tf.concat([filters, filters[...,::-1]], axis=-2)
+            filters = filters * tf.constant([[[ 1, 1],
+                                              [-1, 1]]], dtype=filters.dtype)
+        else:
+            filters = tf.expand_dims(filters, -1)
+        coefs = tf.nn.conv1d(coefs, filters, 1, 'VALID')
+    # Poly.fromroots(...).coefs is always double precision
+    # so for compatibility we will return a double
+    coefs = tf.cast(coefs, tf.float64)
+    if roots.dtype.is_complex:
+        coefs = tf.bitcast(coefs, tf.complex128)
+    else:
+        coefs = tf.squeeze(coefs, axis=-1)
+    return coefs
+
+
 
 def _run_one_test(rootses, solver):
-    coefs = np.apply_along_axis(lambda roots: Poly.fromroots(roots).coef, -1, rootses)
-    # np.polynomial takes coefs in increase order but fqs takes them in decreasing order.
-    return tf.concat(solver(*[tf.constant(coefs[:, i:(i + 1)]) for i in reversed(range(1 + degrees[solver]))]), axis=-1)
+    coefs = tf.map_fn(lambda roots: tf.squeeze(coefs_from_roots(roots), 0),
+                      rootses,
+                      dtype = (tf.complex128 if rootses.dtype.is_complex else tf.float64))
+    return tf.concat(solver(*[coefs[:, i:(i + 1)] for i in range(1 + degrees[solver])]), axis=-1)
 
 
 def tensor_2d_to_nested_sets(t: tf.Tensor) -> Set[FrozenSet[Any]]:
@@ -54,17 +90,17 @@ def assertSetsClose(test: tf.test.TestCase, expected: tf.Tensor, actual: tf.Tens
 class QuadraticTest(tf.test.TestCase):
 
     def test_identical_real_roots(self):
-        expected = np.array([[i] * 2 for i in range(3)], dtype=np.float32)
+        expected = tf.constant([[i] * 2 for i in range(3)], dtype=tf.float64)
         actual = _run_one_test(expected, quadratic)
         assertSetsClose(self, expected, actual)
 
     def test_distinct_real_roots(self):
         expected = random_roots(quadratic)
         actual = _run_one_test(expected, quadratic)
-        assertSetsClose(self, expected, actual)
+        assertSetsClose(self, tf.cast(expected, tf.complex128), actual)
 
     def test_identical_complex_roots(self):
-        expected = np.array([[i - (i * 1j)] * 2 for i in range(3)], dtype=np.complex64)
+        expected = tf.constant([[i - (i * 1j)] * 2 for i in range(3)], dtype=tf.complex128)
         actual = _run_one_test(expected, quadratic)
         assertSetsClose(self, expected, actual)
 
@@ -77,27 +113,27 @@ class QuadraticTest(tf.test.TestCase):
 class CubicTest(tf.test.TestCase):
 
     def test_identical_real_roots(self):
-        expected = np.array([[i] * 3 for i in range(3)], dtype=np.float32)
+        expected = tf.constant([[i] * 3 for i in range(3)], dtype=tf.float64)
         actual = _run_one_test(expected, cubic)
         assertSetsClose(self, expected, actual)
 
     def test_one_distinct_two_identical_real_roots(self):
-        expected = np.array([[i] + [i + 1] * 2 for i in range(0, 6, 2)], dtype=np.float32)
+        expected = tf.constant([[i] + [i + 1] * 2 for i in range(0, 6, 2)], dtype=tf.float64)
         actual = _run_one_test(expected, cubic)
         assertSetsClose(self, expected, actual)
 
     def test_distinct_real_roots(self):
         expected = random_roots(cubic)
         actual = _run_one_test(expected, cubic)
-        assertSetsClose(self, expected, actual)
+        assertSetsClose(self, tf.cast(expected, tf.complex128), actual)
 
     def test_identical_complex_roots(self):
-        expected = np.array([[i + ((i + 1) * 1j)] * 3 for i in range(3)], dtype=np.complex64)
+        expected = tf.constant([[i + ((i + 1) * 1j)] * 3 for i in range(3)], dtype=tf.complex128)
         actual = _run_one_test(expected, cubic)
         assertSetsClose(self, expected, actual)
 
     def test_one_distinct_two_identical_complex_roots(self):
-        expected = np.array([[-i + ((i + 1) * 1j)] + [i - ((i + 1) * 1j)] * 2 for i in range(3)], dtype=np.complex64)
+        expected = tf.constant([[-i + ((i + 1) * 1j)] + [i - ((i + 1) * 1j)] * 2 for i in range(3)], dtype=tf.complex128)
         actual = _run_one_test(expected, cubic)
         assertSetsClose(self, expected, actual)
 
@@ -110,38 +146,38 @@ class CubicTest(tf.test.TestCase):
 class QuarticTest(tf.test.TestCase):
 
     def test_identical_real_roots(self):
-        expected = np.array([[i] * 4 for i in range(3)], dtype=np.float32)
+        expected = tf.constant([[i] * 4 for i in range(3)], dtype=tf.float64)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
     def test_one_distinct_three_identical_real_roots(self):
-        expected = np.array([[i] + [i + 1] * 3 for i in range(0, 6, 2)], dtype=np.float32)
+        expected = tf.constant([[i] + [i + 1] * 3 for i in range(0, 6, 2)], dtype=tf.float64)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
     def test_biquadratic_real_roots(self):
-        expected = np.array([[i] * 2 + [i + 1] * 2 for i in range(0, 6, 2)], dtype=np.float32)
+        expected = tf.constant([[i] * 2 + [i + 1] * 2 for i in range(0, 6, 2)], dtype=tf.float64)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
     def test_distinct_real_roots(self):
         expected = random_roots(quartic)
         actual = _run_one_test(expected, quartic)
-        assertSetsClose(self, expected, actual)
+        assertSetsClose(self, tf.cast(expected, tf.complex128), actual)
 
     def test_identical_complex_roots(self):
-        expected = np.array([[i + ((i + 1) * 1j)] * 4 for i in range(3)], dtype=np.complex64)
+        expected = tf.constant([[i + ((i + 1) * 1j)] * 4 for i in range(3)], dtype=tf.complex128)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
     def test_one_distinct_three_identical_complex_roots(self):
-        expected = np.array([[-i + ((i + 1) * 1j)] + [i - ((i + 1) * 1j)] * 3 for i in range(3)], dtype=np.complex64)
+        expected = tf.constant([[-i + ((i + 1) * 1j)] + [i - ((i + 1) * 1j)] * 3 for i in range(3)], dtype=tf.complex128)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
     def test_biquadratic_complex_roots(self):
-        expected = np.array([[-i + ((i + 1) * 1j)] * 2 + [i - ((i + 1) * 1j)] * 2 for i in range(3)],
-                            dtype=np.complex64)
+        expected = tf.constant([[-i + ((i + 1) * 1j)] * 2 + [i - ((i + 1) * 1j)] * 2 for i in range(3)],
+                            dtype=tf.complex128)
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
@@ -153,12 +189,12 @@ class QuarticTest(tf.test.TestCase):
 class GoodGradientsCustomGradientFnTest(tf.test.TestCase):
 
     def test_square_root_has_good_gradients(self) -> None:
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex64)
+        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex128)
         with tf.GradientTape(persistent=True) as tape:
             sqrt_p = square_root(p)
         grads = tape.gradient(sqrt_p, p)
 
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float32)
+        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             sqrt_p = square_root(ensure_complex(p))
         grads = tape.gradient(sqrt_p, p)
@@ -166,12 +202,12 @@ class GoodGradientsCustomGradientFnTest(tf.test.TestCase):
         self.assertNotAllClose(grads, 0.)
 
     def test_cube_root_has_good_gradients(self) -> None:
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex64)
+        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex128)
         with tf.GradientTape(persistent=True) as tape:
             cbrt_p = cubic_root(p)
         grads = tape.gradient(cbrt_p, p)
 
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float32)
+        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             cbrt_p = cubic_root(ensure_complex(p))
         grads = tape.gradient(cbrt_p, p)
@@ -182,8 +218,8 @@ class GoodGradientsCustomGradientFnTest(tf.test.TestCase):
 class GoodGradientsLinearTest(tf.test.TestCase):
 
     def test_linear_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float32)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float32)
+        x = tf.Variable([0, 0, 0], dtype=tf.float64)
+        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             a, b, c, d, e = coefs(x, y)
             real_roots = linear(a, b, tape=tape, x=x, y=y)
@@ -195,8 +231,8 @@ class GoodGradientsLinearTest(tf.test.TestCase):
 class GoodGradientsQuadraticTest(tf.test.TestCase):
 
     def test_quadratic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float32)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float32)
+        x = tf.Variable([0, 0, 0], dtype=tf.float64)
+        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             a, b, c, d, e = coefs(x, y)
             roots = quadratic(a, b, c, assume_quadratic=False, tape=tape, x=x, y=y)
@@ -209,8 +245,8 @@ class GoodGradientsQuadraticTest(tf.test.TestCase):
 class GoodGradientsCubicTest(tf.test.TestCase):
 
     def test_cubic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float32)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float32)
+        x = tf.Variable([0, 0, 0], dtype=tf.float64)
+        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             a, b, c, d, e = coefs(x, y)
             roots = cubic(a, b, c, d, assume_cubic=False, tape=tape, x=x, y=y)
@@ -223,8 +259,8 @@ class GoodGradientsCubicTest(tf.test.TestCase):
 class GoodGradientsQuarticTest(tf.test.TestCase):
 
     def test_quartic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float32)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float32)
+        x = tf.Variable([0, 0, 0], dtype=tf.float64)
+        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             a, b, c, d, e = coefs(x, y)
             roots = quartic(a, b, c, d, e, assume_quartic=False, tape=tape, x=x, y=y)
