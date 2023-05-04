@@ -7,10 +7,9 @@ from .fqs import linear
 from .fqs import quadratic
 from .fqs import quartic
 from .fqs import square_root
-from .orthogonal_least_quartics import coefs
 import tensorflow as tf
 
-degrees = {quadratic: 2, cubic: 3, quartic: 4}
+degrees = {linear: 1, quadratic: 2, cubic: 3, quartic: 4}
 
 
 def random_roots(solver: Callable,
@@ -186,7 +185,7 @@ class QuarticTest(tf.test.TestCase):
         actual = _run_one_test(expected, quartic)
         assertSetsClose(self, expected, actual)
 
-class GoodGradientsCustomGradientFnTest(tf.test.TestCase):
+class NthRootsCustomGradientsFnTest(tf.test.TestCase):
 
     def test_square_root_has_good_gradients(self) -> None:
         p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex128)
@@ -215,60 +214,89 @@ class GoodGradientsCustomGradientFnTest(tf.test.TestCase):
         self.assertNotAllClose(grads, 0.)
 
 
-class GoodGradientsLinearTest(tf.test.TestCase):
+class DifferentiableSolversTest(tf.test.TestCase):
+    """
+    For an Nth degree polynomial, define N roots as variables,
+    create polynomial coefficients, solve, and then compute
+    the matrix of partial derivatives of the solved roots w.r.t
+    the input roots variables.
+    Summing these partial derivatives over input variables should
+    yield 1 for each solved root.
 
+    We should also see various interpretable intermediate values
+    for repeated roots, although these get less interpretable as
+    the degree of the polynomial increases.
+    """
     def test_linear_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float64)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
+        x = tf.Variable([-2,-1, 0, 0, 1, 3], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
-            a, b, c, d, e = coefs(x, y)
-            real_roots = linear(a, b, tape=tape, x=x, y=y)
-        grads = tape.gradient(real_roots, y)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
-
-
-class GoodGradientsQuadraticTest(tf.test.TestCase):
+            roots = tf.expand_dims(x, axis=-1)
+            derived_roots = _run_one_test(roots, linear)
+            derived_x = derived_roots[:, 0]
+            dr_dx = tape.gradient(derived_x, x)
+        self.assertAllClose(tf.ones_like(dr_dx), dr_dx)
 
     def test_quadratic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float64)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
+        x = tf.Variable([-2,-1, 0, 0, 1, 3], dtype=tf.float64)
+        y = tf.Variable([ 2, 1, 0, 1, 4, 3], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
-            a, b, c, d, e = coefs(x, y)
-            roots = quadratic(a, b, c, assume_quadratic=False, tape=tape, x=x, y=y)
-            real_roots = tf.stack([tf.math.real(r) for r in roots], axis=-1)
-        grads = tape.gradient(real_roots, y)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
+            roots = tf.stack([x, y],axis=-1)
+            derived_roots = _run_one_test(roots, quadratic)
+            derived_x = derived_roots[:, 0]
+            derived_y = derived_roots[:, 1]
+        dr_dx = tf.stack([tape.gradient(derived_x, x), tape.gradient(derived_y, x)], axis=0)
+        dr_dy = tf.stack([tape.gradient(derived_x, y), tape.gradient(derived_y, y)], axis=0)
+        all_grads = tf.stack([dr_dx, dr_dy], axis=0)
 
-
-class GoodGradientsCubicTest(tf.test.TestCase):
+        same_mask = tf.equal(x, y)
+        expected_same = tf.cast(tf.where(same_mask, 0.5, 1.0), dtype=tf.float64)
+        expected_diff = tf.cast(tf.where(same_mask, 0.5, 0.0), dtype=tf.float64)
+        all_expected = tf.stack([expected_same, expected_diff], axis=0)
+        all_expected = tf.stack([all_expected, all_expected[::-1,...]], axis=0)
+        self.assertAllClose(all_expected, all_grads, atol=1e-04)
 
     def test_cubic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float64)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
+        x = tf.Variable([-2,-1, 0,-1, 1, 3], dtype=tf.float64)
+        y = tf.Variable([ 2, 0, 0,-1, 4, 5], dtype=tf.float64)
+        z = tf.Variable([ 2, 1, 0, 0, 5, 6], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
-            a, b, c, d, e = coefs(x, y)
-            roots = cubic(a, b, c, d, assume_cubic=False, tape=tape, x=x, y=y)
-            real_roots = tf.stack([tf.math.real(r) for r in roots], axis=-1)
-        grads = tape.gradient(real_roots, y)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
+            roots = tf.stack([x, y, z],axis=-1)
+            derived_roots = _run_one_test(roots, cubic)
+            derived_roots = tf.sort(tf.math.real(derived_roots), axis=-1)
+            derived_x = derived_roots[:, 0]
+            derived_y = derived_roots[:, 1]
+            derived_z = derived_roots[:, 2]
+        dr_dx = tf.stack([tape.gradient(derived_x, x), tape.gradient(derived_y, x), tape.gradient(derived_z, x)], axis=0)
+        dr_dy = tf.stack([tape.gradient(derived_x, y), tape.gradient(derived_y, y), tape.gradient(derived_z, y)], axis=0)
+        dr_dz = tf.stack([tape.gradient(derived_x, z), tape.gradient(derived_y, z), tape.gradient(derived_z, z)], axis=0)
+        all_grads = tf.stack([dr_dx, dr_dy, dr_dz], axis=0)
 
+        actual = tf.reduce_sum(all_grads, axis=0)
 
-class GoodGradientsQuarticTest(tf.test.TestCase):
+        self.assertAllClose(tf.ones_like(actual), actual, atol=1e-04)
 
     def test_quartic_solver_has_good_gradients(self):
-        x = tf.Variable([0, 0, 0], dtype=tf.float64)
-        y = tf.Variable([-1, 0, 1], dtype=tf.float64)
+        x = tf.Variable([-2,-1, 0,-1, 1, 3], dtype=tf.float64)
+        y = tf.Variable([-2, 0, 0,-1, 4, 5], dtype=tf.float64)
+        z = tf.Variable([ 2, 0, 0,-1, 8, 7], dtype=tf.float64)
+        w = tf.Variable([ 2, 1, 0, 0,16,11], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
-            a, b, c, d, e = coefs(x, y)
-            roots = quartic(a, b, c, d, e, assume_quartic=False, tape=tape, x=x, y=y)
-            real_roots = tf.stack([tf.math.real(r) for r in roots], axis=-1)
-        grads = tape.gradient(real_roots, y)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
+            roots = tf.stack([x, y, z, w],axis=-1)
+            derived_roots = _run_one_test(roots, quartic)
+            derived_roots = tf.sort(tf.math.real(derived_roots), axis=-1)
+            derived_x = derived_roots[:, 0]
+            derived_y = derived_roots[:, 1]
+            derived_z = derived_roots[:, 2]
+            derived_w = derived_roots[:, 3]
+        dr_dx = tf.stack([tape.gradient(derived_x, x), tape.gradient(derived_y, x), tape.gradient(derived_z, x), tape.gradient(derived_w, x)], axis=0)
+        dr_dy = tf.stack([tape.gradient(derived_x, y), tape.gradient(derived_y, y), tape.gradient(derived_z, y), tape.gradient(derived_w, y)], axis=0)
+        dr_dz = tf.stack([tape.gradient(derived_x, z), tape.gradient(derived_y, z), tape.gradient(derived_z, z), tape.gradient(derived_w, z)], axis=0)
+        dr_dw = tf.stack([tape.gradient(derived_x, w), tape.gradient(derived_y, w), tape.gradient(derived_z, w), tape.gradient(derived_w, w)], axis=0)
+        all_grads = tf.stack([dr_dx, dr_dy, dr_dz, dr_dw], axis=0)
 
+        actual = tf.reduce_sum(all_grads, axis=0)
+
+        self.assertAllClose(tf.ones_like(actual), actual, atol=1e-04)
 
 if __name__ == "__main__":
     tf.config.run_functions_eagerly(False)
