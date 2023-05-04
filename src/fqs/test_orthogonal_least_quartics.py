@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+Authors: elfprince13 and tnybny, based on original library by NKrvavica
+MIT Licensed
+"""
+
 from .fqs import quartic
 from math import isclose
 import numpy as np
@@ -67,5 +73,5 @@ class RegressingAngleTest(tf.test.TestCase):
         self.assertIn(True, tf_isclose(roots, 0., atol=1e-6))
 
 if __name__ == "__main__":
-    tf.config.run_functions_eagerly(True)
+    tf.config.run_functions_eagerly(False)
     tf.test.main()

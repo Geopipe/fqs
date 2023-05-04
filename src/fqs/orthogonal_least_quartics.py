@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+Authors: elfprince13 and tnybny, based on original library by NKrvavica
+MIT Licensed
+"""
+
 from typing import Tuple
 
 import tensorflow as tf

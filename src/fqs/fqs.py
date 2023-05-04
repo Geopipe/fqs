@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Jan  4 13:50:23 2019
-
-@author: NKrvavica
+Authors: elfprince13 and tnybny, based on original library by NKrvavica
+MIT Licensed
 """
 
 import sys
 import traceback
-from typing import Tuple, Union
+from typing import Iterable, Tuple, Union
 
 import tensorflow as tf
 
@@ -211,9 +210,6 @@ def cubic(a0: tf.Tensor,
     with tf.name_scope("cubic"):
         if not assume_cubic:
             (quadratic_mask, a0) = _safe_denom(a0)
-        #if unique_real_root and (a0.dtype.is_complex or b0.dtype.is_complex or c0.dtype.is_complex or d0.dtype.is_complex):
-        #    raise TypeError("There may be no real root if the coefficients are complex")
-
         # Reduce the cubic equation to the form:
         #    x^3 + b*x^2 + c*x + d = 0
         b, c, d = b0 / a0, c0 / a0, d0 / a0
@@ -256,9 +252,7 @@ def cubic(a0: tf.Tensor,
                 C1_cubed = tf.where(tf.abs(C1_cubed_plus) > tf.abs(C1_cubed_minus), C1_cubed_plus, C1_cubed_minus)
                 C1 = cubic_root(C1_cubed)
                 null_C1 = (C1 == 0)
-                # algebraically, C1==0 precisely when delta0==0.
-                # numerically, if this turns out to be a problem,
-                # can always add a second test for explicit C1 == 0
+                
                 C_branches = (C1, (-1. + sqr3 * 1j) * C1 / 2, (-1. - sqr3 * 1j) * C1 / 2)
                 r_branch = lambda i: ensure_complex(neg_third_b) - third * (C_branches[i] + delta0 / tf.where(
                     null_C1, tf.cast(1. + 0j, C1.dtype), C_branches[i]))
@@ -273,7 +267,7 @@ def cubic(a0: tf.Tensor,
 
         # Masks for different combinations of roots
         triple_root_mask = null_delta0 & null_delta1
-        root_branches = zip(single_repeated_root(**kwargs), multiple_roots(**kwargs))
+        root_branches: Iterable[Tuple[tf.Tensor, tf.Tensor]] = zip(single_repeated_root(**kwargs), multiple_roots(**kwargs))
         cubic_roots = tuple(
             tf.where(triple_root_mask, single_branch, multiple_branch)
             for single_branch, multiple_branch in root_branches)
@@ -287,7 +281,7 @@ def cubic(a0: tf.Tensor,
                     else:
                         return r1, r1, r2
 
-            root_branches = zip(quadratic_roots(**kwargs), cubic_roots)
+            root_branches: Iterable[Tuple[tf.Tensor, tf.Tensor]] = zip(quadratic_roots(**kwargs), cubic_roots)
             cubic_roots = tuple(
                 tf.where(quadratic_mask, quadratic_branch, cubic_branch)
                 for quadratic_branch, cubic_branch in root_branches)
@@ -361,15 +355,13 @@ def quartic(a0: tf.Tensor,
             quarter_b = ensure_complex(quarter_b)
             quartic_roots = (r0 - quarter_b, r1 - quarter_b, r2 - quarter_b, r3 - quarter_b)
 
-        if assume_quartic:
-            return quartic_roots
-        else:
-
+        if not assume_quartic:
             def cubic_roots(**kwargs):
                 with tf.name_scope("cubic_fallback"):
                     r1, r2, r3 = cubic(b0, c0, d0, e0, assume_cubic=False, **kwargs)
                     return (r1, r1, r2, r3)
 
-            root_branches = zip(cubic_roots(**kwargs), quartic_roots)
-            return tuple(
+            root_branches: Iterable[Tuple[tf.Tensor, tf.Tensor]] = zip(cubic_roots(**kwargs), quartic_roots)
+            quartic_roots = tuple(
                 tf.where(cubic_mask, cubic_branch, quartic_branch) for cubic_branch, quartic_branch in root_branches)
+        return quartic_roots

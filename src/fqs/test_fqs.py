@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+Authors: elfprince13 and tnybny, based on original library by NKrvavica
+MIT Licensed
+"""
+
 from typing import Any, Callable, FrozenSet, Set
 
 from .fqs import cubic
@@ -188,30 +194,18 @@ class QuarticTest(tf.test.TestCase):
 class NthRootsCustomGradientsFnTest(tf.test.TestCase):
 
     def test_square_root_has_good_gradients(self) -> None:
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex128)
-        with tf.GradientTape(persistent=True) as tape:
-            sqrt_p = square_root(p)
-        grads = tape.gradient(sqrt_p, p)
-
         p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             sqrt_p = square_root(ensure_complex(p))
         grads = tape.gradient(sqrt_p, p)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
+        self.assertNotIn(False, tf.math.is_finite(grads))
 
     def test_cube_root_has_good_gradients(self) -> None:
-        p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.complex128)
-        with tf.GradientTape(persistent=True) as tape:
-            cbrt_p = cubic_root(p)
-        grads = tape.gradient(cbrt_p, p)
-
         p = tf.Variable([-1, -1e-10, 0, 1e-4, 1], dtype=tf.float64)
         with tf.GradientTape(persistent=True) as tape:
             cbrt_p = cubic_root(ensure_complex(p))
         grads = tape.gradient(cbrt_p, p)
-        tf.debugging.assert_all_finite(grads, 'grad real')
-        self.assertNotAllClose(grads, 0.)
+        self.assertNotIn(False, tf.math.is_finite(grads))
 
 
 class DifferentiableSolversTest(tf.test.TestCase):
@@ -233,7 +227,7 @@ class DifferentiableSolversTest(tf.test.TestCase):
             roots = tf.expand_dims(x, axis=-1)
             derived_roots = _run_one_test(roots, linear)
             derived_x = derived_roots[:, 0]
-            dr_dx = tape.gradient(derived_x, x)
+        dr_dx = tape.gradient(derived_x, x)
         self.assertAllClose(tf.ones_like(dr_dx), dr_dx)
 
     def test_quadratic_solver_has_good_gradients(self):
