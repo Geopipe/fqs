@@ -249,15 +249,19 @@ def cubic(a0: tf.Tensor,
                 deltas_sqrt_arg = ensure_complex(deltas_sqrt_arg)
                 delta0 = ensure_complex(delta0)
                 delta1 = ensure_complex(delta1)
-                C1_cubed = (delta1 + square_root(deltas_sqrt_arg)) / 2.
+                C1_pm_term = square_root(deltas_sqrt_arg)
+                # we must not take the zero branch unless both branches are 0
+                C1_cubed_plus =  (delta1 + C1_pm_term) / 2.
+                C1_cubed_minus = (delta1 - C1_pm_term) / 2.
+                C1_cubed = tf.where(tf.abs(C1_cubed_plus) > tf.abs(C1_cubed_minus), C1_cubed_plus, C1_cubed_minus)
                 C1 = cubic_root(C1_cubed)
-                # C1 = cubic_root((_ensure_complex(delta1) + square_root(_ensure_complex(delta1 * delta1 - 4. * delta0 * delta0 * delta0))) / 2.)
+                null_C1 = (C1 == 0)
                 # algebraically, C1==0 precisely when delta0==0.
                 # numerically, if this turns out to be a problem,
                 # can always add a second test for explicit C1 == 0
                 C_branches = (C1, (-1. + sqr3 * 1j) * C1 / 2, (-1. - sqr3 * 1j) * C1 / 2)
                 r_branch = lambda i: ensure_complex(neg_third_b) - third * (C_branches[i] + delta0 / tf.where(
-                    null_delta0, tf.cast(1. + 0j, C1.dtype), C_branches[i]))
+                    null_C1, tf.cast(1. + 0j, C1.dtype), C_branches[i]))
                 r1 = r_branch(0)
                 if first_root_only:
                     # this is only valid if the tests for complex coefficients has run above.
