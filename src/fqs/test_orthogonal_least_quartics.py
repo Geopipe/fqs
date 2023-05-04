@@ -1,13 +1,18 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Authors: elfprince13 and tnybny, based on original library by NKrvavica
 MIT Licensed
 """
 
-from .fqs import quartic
-from math import isclose
 import numpy as np
-from .orthogonal_least_quartics import coefs
+try:
+    # if run as module
+    from fqs.fqs import quartic
+    from fqs.orthogonal_least_quartics import coefs
+except ModuleNotFoundError:
+    from fqs import quartic
+    from orthogonal_least_quartics import coefs
 import tensorflow as tf
 from tensorflow.experimental.numpy import isclose as tf_isclose
 

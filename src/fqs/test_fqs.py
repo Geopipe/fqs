@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Authors: elfprince13 and tnybny, based on original library by NKrvavica
@@ -6,13 +7,24 @@ MIT Licensed
 
 from typing import Any, Callable, FrozenSet, Set
 
-from .fqs import cubic
-from .fqs import cubic_root
-from .fqs import ensure_complex
-from .fqs import linear
-from .fqs import quadratic
-from .fqs import quartic
-from .fqs import square_root
+try:
+    # if run as module
+    from fqs.fqs import cubic
+    from fqs.fqs import cubic_root
+    from fqs.fqs import ensure_complex
+    from fqs.fqs import linear
+    from fqs.fqs import quadratic
+    from fqs.fqs import quartic
+    from fqs.fqs import square_root
+except ModuleNotFoundError:
+    # if run as script
+    from fqs import cubic
+    from fqs import cubic_root
+    from fqs import ensure_complex
+    from fqs import linear
+    from fqs import quadratic
+    from fqs import quartic
+    from fqs import square_root
 import tensorflow as tf
 
 degrees = {linear: 1, quadratic: 2, cubic: 3, quartic: 4}
