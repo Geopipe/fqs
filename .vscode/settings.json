@@ -1,0 +1,29 @@
+{
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.autoImportCompletions": true,
+    "python.linting.mypyEnabled": true,
+    "python.linting.enabled": true,
+    "editor.rulers": [
+        120
+    ],
+    "python.testing.pytestArgs": [],
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/__pycache__": true,
+        "**/node_modules/*/**": true,
+        "tests/data/**": true,
+        "**/.mypy_cache": true,
+    },
+    "mypy.runUsingActiveInterpreter": true,
+    "cSpell.words": [
+        "coefs",
+        "dtype"
+    ],
+    "cSpell.dictionaries": [
+        "python",
+        "bash"
+    ]
+}

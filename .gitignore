@@ -1,0 +1,32 @@
+*/**/__pycache__/
+*.py[cod]
+*.DS_Store
+*.idea
+.mypy_cache
+*.pdf
+*.svg
+*.egg-info
+*.ipynb_checkpoints
+*.pickle
+*.pkl
+*.db
+*.p
+
+# Logs folders
+logs
+logs_image/*
+test_logs/*
+
+# VS Code files for those working on multiple tools
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.code-workspace
+!.vscode/*code-snippets
+
+# MyPy daemon file
+.dmypy.json
+
+# Local History for Visual Studio Code
+.history/
